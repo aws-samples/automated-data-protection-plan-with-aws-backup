@@ -1,0 +1,50 @@
+  # This CloudFormation template creates a Multi-Region replica of an existing KMS key.
+  # The primary KMS key is located in the us-east-1 region and is replicated to the us-east-2 region.
+  # It also creates an alias for the replicated KMS key in the us-east-2 region. 
+  # The template includes necessary parameters to specify the Target Account ID, the ARN of the primary KMS key, and the alias name for the KMS key. The KMS key policies are configured to allow IAM users in the specified target account to use the key.
+
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  TargetAccountId:
+    Type: String
+    Description: KMS key Target Account Id
+  KMSKeyArn:
+    Type: String
+    Description: KMS Key ARN for the backup-demo-key. 
+  KMSKeyAliasName:
+    Type: String
+    Description: Provide the name of the KMSKeyAlias or use the default value
+    Default: 'backup-demo-key'
+
+Resources:    
+  KMSMultiRegionReplica:
+    Type: AWS::KMS::ReplicaKey
+    Properties:
+      Description: Replicating the key to US-EAST-2
+      Enabled: true
+      PrimaryKeyArn: !Ref KMSKeyArn
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Allow IAM users in the account to use the key
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${TargetAccountId}:root
+            Action:
+              - 'kms:*'
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: backup-demo-key
+  KMSKeyAlias:
+    Type: 'AWS::KMS::Alias'
+    Properties:
+      AliasName: !Sub 'alias/${KMSKeyAliasName}'
+      TargetKeyId: !Ref KMSMultiRegionReplica
+
+Outputs:
+  KMSMultiRegionReplicaArn:
+      Description: 'ARN of the replicated KMS key'
+      Value: !GetAtt KMSMultiRegionReplica.Arn
+      Export:
+        Name: 'BackupKMSMultiRegionReplicaArn'

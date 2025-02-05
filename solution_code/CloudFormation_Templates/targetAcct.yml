@@ -1,0 +1,400 @@
+# The template creates an RDS instance with MySQL, encrypted storage, and specific security configurations, alongside a custom IAM role for AWS Backup operations. 
+# It also establishes a VPC, subnets, and security groups necessary for the RDS instance, and includes a parameter for managing AWS backup through an SSM parameter.
+
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  MasterAccountId:
+    Type: String
+    Description: The ID of the AWS account where the Lambda function will run
+  LambdaExecutionRoleName:
+    Type: String
+    Description: The name of the Lambda execution role in the master account
+    Default: backup-LambdaExecutionRole
+  KMSTargetAccountId:
+    Type: String
+    Description: KMS key Target Account Id
+  KMSKeyAliasName:
+    Type: String
+    Description: Provide the name of the KMSKeyAlias or use the default value
+    Default: 'backup-demo-key'
+
+Resources:
+  BackupCustomRole:
+    Type: AWS::IAM::Role
+    DependsOn: KMSKey
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: 'The role name is utilized in Lambda code to create AWS Backup resource hence a specific name is utilized'
+          - id: W11
+            reason: 'The role requires * for the Describe API calls and is mitigated with conditional statements'    
+    Properties:
+      RoleName: AWSBackup-Custom
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CustomBackupRDSAccessPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: "ActionsSupportingTag"
+                Effect: "Allow"
+                Action:
+                  - "rds:CreateDBSnapshot"
+                  - "rds:CreateDBClusterSnapshot"
+                  - "rds:CopyDBSnapshot"
+                  - "rds:CopyDBClusterSnapshot"
+                  - "rds:AddTagsToResource"
+                  - "rds:ListTagsForResource"
+                  - "rds:RestoreDBInstanceFromDBSnapshot"
+                  - "rds:RestoreDBInstanceToPointInTime"
+                  - "rds:RestoreDBClusterFromSnapshot"
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    "aws:RequestTag/ABS": "backup-demo"
+              - Sid: "NoTagButResourceLevelSnapshot"
+                Effect: "Allow"
+                Action:
+                  - "rds:DescribeDBSnapshots"
+                  - "rds:ListTagsForResource"
+                  - "rds:DescribeDBClusters"
+                  - "rds:DescribeDBInstances"
+                  - "rds:DescribeDBClusterAutomatedBackup"
+                Resource: "*"
+              - Sid: "AWSBackupCrossRegionCopyPermissions"
+                Effect: "Allow"
+                Action:
+                  - "backup:CopyIntoBackupVault"
+                  - "backup:StartCopyJob"
+                  - "backup:DescribeCopyJob"
+                  - "backup:ListCopyJobs"
+                Resource: "*"
+              - Sid: "AWSBackupCrossRegionKMSPermissions"
+                Effect: "Allow"
+                Action:
+                  - 'kms:DescribeKey'
+                  - 'kms:Encrypt'
+                  - 'kms:GenerateDataKey'
+                  - 'kms:Decrypt'
+                  - 'kms:CreateGrant'
+                  - 'kms:RetireGrant'
+                  - 'kms:GenerateDataKeyWithoutPlaintext'
+                Resource: !Sub 'arn:${AWS::Partition}:kms:*:${AWS::AccountId}:key/*'
+                Condition:
+                  ForAnyValue:StringLike:
+                    "kms:ResourceAliases": 
+                      - !Sub "alias/${KMSKeyAliasName}" 
+                      - "alias/aws/rds"
+                      - "alias/aws/backup"
+
+  RDSSecret:
+      Type: 'AWS::SecretsManager::Secret'
+      DependsOn: KMSKey
+      Properties:
+        Name: 'RDSMasterUserSecret'
+        Description: 'Master user secret for the RDS instance'
+        KmsKeyId: !Ref KMSKey
+        GenerateSecretString:
+          SecretStringTemplate: '{"username":"admin"}'
+          GenerateStringKey: "password"
+          PasswordLength: 30
+          ExcludeCharacters: '"@/\\'
+
+  RDSInstance:
+    Type: 'AWS::RDS::DBInstance'
+    DependsOn: KMSKey
+    Properties:
+      Engine: 'mysql'
+      EngineVersion: '8.0'
+      PubliclyAccessible: false
+      StorageEncrypted: true
+      DeletionProtection: true
+      DBInstanceClass: 'db.m5d.large'
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      MasterUsername: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:username}}']]
+      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:password}}']]
+      AllocatedStorage: 20
+      StorageType: gp2
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      Tags:
+        - Key: 'ABS'
+          Value: 'backup-demo'
+
+  # Define a VPC
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W60
+            reason: 'VPC flow log is required to be attached but it is eliminated for sample environment'
+    Properties:
+      CidrBlock: '10.0.0.0/16'
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      InstanceTenancy: 'default'
+      Tags:
+        - Key: 'Name'
+          Value: 'backup-demo-vpc'
+
+  # Define subnets
+  DBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: 'Subnets for RDS'
+      SubnetIds:
+        - !Ref Subnet1
+        - !Ref Subnet2
+
+  Subnet1:
+    Type: 'AWS::EC2::Subnet'
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - W3010
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '10.0.0.0/24'
+      AvailabilityZone: !Select [0, !GetAZs 'us-east-1']
+      Tags:
+        - Key: 'Name'
+          Value: 'backup-demo-subnet-1'
+
+  Subnet2:
+    Type: 'AWS::EC2::Subnet'
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - W3010
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '10.0.1.0/24'
+      AvailabilityZone: !Select [1, !GetAZs 'us-east-1']
+      Tags:
+        - Key: 'Name'
+          Value: 'backup-demo-subnet-2'
+
+  # Define a security group for RDS instance
+  RDSSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Security group for RDS instance'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: 'tcp'
+          FromPort: '3306'
+          ToPort: '3306'
+          CidrIp: '10.0.1.0/32'
+          Description: 'Allow inbound MySQL access from specific IP'
+      SecurityGroupEgress:
+        - IpProtocol: 'tcp'
+          FromPort: '3306'
+          ToPort: '3306'
+          CidrIp: '10.0.1.0/24'
+          Description: 'Allow outbound MySQL access to specific subnet'
+      Tags:
+        - Key: 'Name'
+          Value: 'backup-demo-sg' 
+  XacntBackupRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: 'The role is assumed by Lambda Execution role in master account. The role name is hard coded to avoid circular reference'
+          - id: W11
+            reason: 'The role requires acess to all backup vaults starting with ABS* using a condition to limit the scope appropriately'
+    Properties:
+      RoleName: Xacnt_Backup_Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: 'sts:AssumeRole'
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${MasterAccountId}:role/${LambdaExecutionRoleName}'
+      Policies: 
+        - PolicyName: "backupkms"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - Effect: "Allow"
+                Action: 
+                  - kms:CreateGrant
+                  - kms:GenerateDataKey
+                  - kms:Decrypt
+                  - kms:RetireGrant
+                  - kms:DescribeKey
+                Resource: !Sub 'arn:${AWS::Partition}:kms:*:${AWS::AccountId}:key/*' 
+                Condition:
+                  ForAnyValue:StringLike:
+                    "kms:ResourceAliases": 
+                      - !Sub "alias/${KMSKeyAliasName}" 
+                      - "alias/aws/rds"
+                      - "alias/aws/backup"
+
+        - PolicyName: "backupkmslistkeys"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - Effect: "Allow"
+                Action:
+                  - 'kms:ListKeys'
+                  - 'kms:ListAliases'
+                Resource: '*'
+
+        - PolicyName: "backupSSM"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - Effect: "Allow"
+                Action:
+                  - 'ssm:Get*'
+                  - 'ssm:List*'
+                  - 'ssm:Describe*'
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:*:${AWS::AccountId}:parameter/backupprocess/backupplan'
+        - PolicyName: "iamPassRole"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - arn:aws:iam::*:role/AWSBackup*
+              - Effect: Allow
+                Action: 
+                  - iam:GetRole
+                  - iam:PassRole
+                Resource:
+                  - arn:aws:iam::*:role/AWSBackup*
+        - PolicyName: "backupActions"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement:  
+              - Effect: Allow
+                Action: 
+                  - backup:CreateBackupVault
+                  - backup:TagResource
+                  - backup:CreateBackupVault
+                  - backup:CreateBackupPlan
+                  - backup:CreateBackupSelection
+                  - backup:DeleteBackupPlan
+                  - backup:DeleteBackupSelection
+                  - backup:DeleteBackupVault
+                  - backup:DeleteRecoveryPoint
+                  - backup:DescribeBackupJob
+                  - backup:DescribeBackupVault
+                  - backup:DescribeRecoveryPoint
+                  - backup:GetBackupPlan
+                  - backup:GetBackupSelection
+                  - backup:GetRecoveryPointRestoreMetadata
+                  - backup:ListRecoveryPointsByBackupVault
+                  - backup:ListBackupJobs
+                  - backup:ListBackupPlans
+                  - backup:ListBackupSelections
+                  - backup:ListBackupVaults
+                  - backup:ListRestoreJobs
+                  - backup:ListTags
+                  - backup:StartBackupJob
+                  - backup:StartCopyJob 
+                  - backup:StartRestoreJob
+                  - backup:UpdateBackupPlan
+                Resource: "*"
+        - PolicyName: "backupstorageActions"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement:
+            - Effect: Allow
+              Action: 
+                - backup-storage:MountCapsule                
+              Resource: "*"
+
+  BackupProcessSSMParameter:
+    Type: AWS::SSM::Parameter
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - W1020
+    Properties:
+            Type: String
+            Name: /backupprocess/backupplan
+            Value: !Sub |
+              [{
+              		"BackupPlanName": "BackupPlanName",
+              		"Rules": [{
+              			"RuleName": "RuleName",
+              			"TargetBackupVaultName": "VaultName",
+              			"ScheduleExpression": "cron(0 12 * * ? *)",
+              			"StartWindowMinutes": 60,
+              			"CompletionWindowMinutes": 123,
+              			"Lifecycle": {
+              				"MoveToColdStorageAfterDays": 200,
+              				"DeleteAfterDays": 300
+              			},
+              			"CopyActions": [{
+              				"Lifecycle": {
+              					"MoveToColdStorageAfterDays": 200,
+              					"DeleteAfterDays": 300
+              				},
+              				"DestinationBackupVaultArn": "DestinationBackupVaultArn"
+              			}],
+              			"EnableContinuousBackup": false
+              		}]
+              	},
+              	{
+              		"ABS": "ABSName"
+              	}
+              ]
+  KMSKey:
+    Type: 'AWS::KMS::Key'
+    Properties:
+      Description: KMS key for backup-demo-key
+      EnableKeyRotation: true
+      MultiRegion: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Allow IAM users in the account to use the key
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${KMSTargetAccountId}:root
+            Action:
+              - 'kms:*'
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: backup-demo-key
+      Enabled: true
+  KMSKeyAlias:
+    Type: 'AWS::KMS::Alias'
+    Properties:
+      AliasName: !Sub 'alias/${KMSKeyAliasName}'
+      TargetKeyId: !Ref KMSKey
+
+
+Outputs:
+  RoleARN:
+    Value: !GetAtt BackupCustomRole.Arn
+  KMSKeyId:
+    Description: KMS Key ID for the backup-demo-key
+    Value: !Ref KMSKey
+    Export: 
+      Name: 'BackupkmsKMSKeyId'
+  KMEKeyArn:
+    Description: KMS Key ARN for the backup-demo-key
+    Value: !GetAtt KMSKey.Arn
+    Export:
+      Name: 'BackupkmsKMSKeyArn'
+    
+

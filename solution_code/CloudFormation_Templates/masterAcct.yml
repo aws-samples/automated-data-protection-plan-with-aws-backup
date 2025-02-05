@@ -1,0 +1,139 @@
+# This template defines resources for creating and managing AWS Lambda functions for cross account backup operations.
+# It includes parameters for S3 bucket and keys, and sets up two Lambda functions ("CreateBackupLambda" and "DeleteBackupLambda") with necessary IAM roles and policies for execution. 
+# The template also establishes permissions for KMS and SSM operations, and outputs the name of the Lambda execution role.
+
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+    S3Bucket:
+        Type: String
+        Description: The name of the S3 bucket where the Lambda code is stored
+    S3Key1:
+        Type: String
+        Description: The key of the S3 object that contains the 'Create Backup' Lambda code
+        Default: aws_backup_create.py.zip
+    S3Key2:
+        Type: String
+        Description: The key of the S3 object that contains the 'Delete Backup' Lambda code
+        Default: aws_backup_delete.py.zip
+    TargetAccountId:
+        Type: String
+        Description: Provide the account Id where the Cross Account IAM role is deployed
+
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: 'The explicit name is necessary for this resource to maintain a consistent naming convention across environments.'  
+    Properties:
+      RoleName: backup-LambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - 'arn:aws:iam::aws:policy/AWSBackupFullAccess'
+        - !Ref MyCustomPolicy
+        - !Ref BackupKMS
+        - !Ref BackupSSM
+        - !Ref BackupKMSListKeys
+
+  MyCustomPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: 'sts:AssumeRole'
+            Resource: !Sub 'arn:${AWS::Partition}:iam::${TargetAccountId}:role/Xacnt_Backup_Role'
+
+
+  BackupKMS:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'kms:DescribeKey'
+            Resource: !Sub 'arn:${AWS::Partition}:kms:*:${AWS::AccountId}:key/backup-demo-key'
+
+  BackupKMSListKeys:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+
+              - 'kms:ListKeys'
+            Resource: !Sub 'arn:${AWS::Partition}:kms:*:${AWS::AccountId}:key/backup-demo-key'
+
+  BackupSSM:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'ssm:Get*'
+              - 'ssm:List*'
+              - 'ssm:Describe*'
+            Resource: !Sub 'arn:${AWS::Partition}:ssm:*:${AWS::AccountId}:parameter/backupprocess/backupplan'
+
+
+  LambdaFunction1:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: 'This example runs this lambda in aws networkspace. Some enterprises require these to be in in VPCs. This Lambda will work in a VPC with outbound internet routing or required service endpoints available to the Lambda subnet.'
+    Properties:
+      FunctionName: CreateBackupLambda
+      Handler: aws_backup_create.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      ReservedConcurrentExecutions: 10
+      Timeout: 300
+      MemorySize: 200
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: !Ref S3Key1
+      Runtime: python3.12
+
+  LambdaFunction2:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: 'This example runs this lambda in aws networkspace. Some enterprises require these run in VPCs. This Lambda will work in a VPC with outbound internet routing or required service endpoints available to the Lambda subnet.'
+    Properties:
+      FunctionName: DeleteBackupLambda
+      Handler: aws_backup_delete.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      ReservedConcurrentExecutions: 10
+      Timeout: 300
+      MemorySize: 200
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: !Ref S3Key2
+      Runtime: python3.12
+
+Outputs:
+  LambdaExecutionRoleName:
+    Value: !Ref LambdaExecutionRole
+    Description: Name of the Lambda execution role created in this template
