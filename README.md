@@ -23,6 +23,14 @@ This solution provides an automated approach to manage backup operations for RDS
 - AWS CLI configured
 - Basic knowledge of AWS services
 
+## Installation
+
+1. Clone the repository:
+```bash
+git clone https://github.com/aws-samples/automated-data-protection-plan-with-aws-backup.git
+cd aws-backup-data-protection-plan-with-aws-backup
+```
+
 ## Components
 
 - AWS Backup
@@ -50,7 +58,7 @@ Used by the master account’s Lambda function to perform backup operations acro
 •	Clone the source code repository from the AWS Samples GitHub to your local machine.
 
 2.	Upload Lambda Function Zip Files:
-•	Upload the two Lambda function zip files from the 'Lambda_Code' folder of the cloned repository to your master account's Amazon S3 bucket, using 'aws_backup_create.py.zip' and 'aws_backup_delete.py.zip' as the object key names. 
+•	Zip the python files with 'aws_backup_create.py.zip' and 'aws_backup_delete.py.zip' as the object key names.Upload the two Lambda function zip files from the 'Lambda_Code' folder of the cloned repository to your master account's Amazon S3 bucket, using 'aws_backup_create.py.zip' and 'aws_backup_delete.py.zip' as the object key names. 
 Note: These Lambda functions are used to create and delete AWS Backup resources in the target account.
 
 3.	Deploy the Master Account CloudFormation Template:
@@ -79,11 +87,3 @@ AWS Backup provides job status tracking and audit reports for compliance. Backup
 
 ## Conclusion
 This solution simplifies AWS Backup management across multiple accounts, ensuring data protection, compliance, and automation. It can be extended to other AWS services beyond RDS by modifying backup selection criteria.
-
-## Installation
-
-1. Clone the repository:
-```bash
-git clone [your-repository-url]
-cd aws_backup_data_protection_plan
-
