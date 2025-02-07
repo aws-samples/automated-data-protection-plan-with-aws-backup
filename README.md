@@ -28,7 +28,7 @@ This solution provides an automated approach to manage backup operations for RDS
 1. Clone the repository:
 ```bash
 git clone https://github.com/aws-samples/automated-data-protection-plan-with-aws-backup.git
-cd aws-backup-data-protection-plan-with-aws-backup
+cd automated-data-protection-plan-with-aws-backup
 ```
 
 ## Components
