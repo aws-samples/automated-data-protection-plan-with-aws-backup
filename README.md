@@ -57,16 +57,35 @@ Used by the master account’s Lambda function to perform backup operations acro
 1.	Clone the Source Code Repository:
 •	Clone the source code repository from the AWS Samples GitHub to your local machine.
 
+```bash
+git clone https://github.com/aws-samples/automated-data-protection-plan-with-aws-backup.git
+cd automated-data-protection-plan-with-aws-backup
+```
+
 2.	Upload Lambda Function Zip Files:
-•	Zip the python files with 'aws_backup_create.py.zip' and 'aws_backup_delete.py.zip' as the object key names.Upload the two Lambda function zip files from the 'Lambda_Code' folder of the cloned repository to your master account's Amazon S3 bucket, using 'aws_backup_create.py.zip' and 'aws_backup_delete.py.zip' as the object key names. 
+•	Zip the python files with 'aws_backup_create.py.zip' and 'aws_backup_delete.py.zip' as the object key names.Upload the two Lambda function zip files from the 'Lambda_Code' folder of the cloned repository to your master account's Amazon S3 bucket. 
 Note: These Lambda functions are used to create and delete AWS Backup resources in the target account.
+
+```bash
+aws s3 cp Lambda_Code/aws_backup_create.py.zip s3://your-s3-bucket/
+
+aws s3 cp Lambda_Code/aws_backup_delete.py.zip s3://your-s3-bucket/
+```
 
 3.	Deploy the Master Account CloudFormation Template:
 •	Deploy the 'masterAcct.yml' CloudFormation template from the 'CloudFormation_Templates' folder of the cloned repository in the AWS CloudFormation console of the master account. 
 •	This template is for setting up AWS Lambda functions to create and delete backups, along with the necessary roles and permissions.
 
+```bash
+aws cloudformation create-stack --stack-name MasterAccountStack --template-body file://CloudFormation_Templates/masterAcct.yml
+```
+
 4.	Deploy the Target Account CloudFormation Template:
 •	Deploy the 'targetAcct.yml' CloudFormation template from the 'CloudFormation_Templates' folder of the cloned repository in the AWS CloudFormation console of the target account's primary region (i.e us-east-1). 
+
+```bash
+aws cloudformation create-stack --stack-name TargetAccountStack --template-body file://CloudFormation_Templates/targetAcct.yml
+```
 
 •	This template creates below resources:
 o	SSM Parameter Store parameter for an AWS Backup Plan, storing the backup plan configuration as a JSON object that can be referenced by AWS Backup to perform backups. 
@@ -76,6 +95,10 @@ o	A custom role with specific AWS Backup policies used for performing backup ope
 
 5.	Create a KMS Multi-Region Key in the secondary region (us-east-2) region:
 Deploy the KMSMultiRegionReplica.yml CloudFormation template in the target account’s us-east-2 region. Make sure you provide the KMSKeyArn id of the KMS alias ‘BackupBlogCredential’ Review the ‘user guide’ for more details on the deployment process.
+
+```bash
+aws cloudformation create-stack --stack-name KMSMultiRegionReplica --template-body file://CloudFormation_Templates/KMSMultiRegionReplica.yml
+```
 
 ## Monitoring & Reporting
 AWS Backup provides job status tracking and audit reports for compliance. Backup events can be monitored via AWS CloudWatch and SNS notifications.
