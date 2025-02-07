@@ -32,11 +32,11 @@ This solution provides an automated approach to manage backup operations for RDS
 - AWS IAM
 - AWS Systems Manager Parameter Store
 
-## ARCHITECTURE DIAGRAM
+## Architecture Diagram
 
 ![alt text](architecture_diagram.png)
 
-## SOLUTION WORKFLOW
+## Solution Workflow
 
 1.	The master account hosts Lambda function to create backup resources in the target account. 
 2.	A JSON formatted input triggers the Backup Lambda using:
