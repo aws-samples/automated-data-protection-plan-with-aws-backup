@@ -36,6 +36,23 @@ This solution provides an automated approach to manage backup operations for RDS
 
 ![alt text](architecture_diagram.png)
 
+## SOLUTION WORKFLOW
+
+1.	The master account hosts Lambda function to create backup resources in the target account. 
+2.	A JSON formatted input triggers the Backup Lambda using:
+{
+  "ABSName": "backup-blog",
+  "AccountId": "xxxxxxxxxxxx"
+}
+3.	The Backup Lambda function contains the code to create the AWS Backup resources in the target account using the ‘ABSName’ and the intended target account ID as inputs. 
+4.	The Backup Lambda’s execution role ‘backup-blog-LambdaExecutionRole’ assumes the role Xacnt_Backup_Role in the target account.
+5.	In the target Account, Backup Lambda creates primary AWS Backup Vault in US-EAST-1 region. The vault uses a KMS multi-region key, which initially is created in the US-EAST-1 region and is replicated to the US-EAST-2 region.
+6.	The Backup Lambda also creates secondary AWS Backup Vault in US-EAST-2 region using the replicated KMS multi region key for the application. 
+7.	The Backup Lambda creates the default backup plan as per rules defined in AWS Systems Manager Parameter Store ‘/backupprocess/backupplan’
+8.	The Backup Lambda also creates default backup selection.
+9.	The RDS resource in the US-EAST-1 region with the tag ‘[ABS - backup-blog]’ will be tracked by the backup selection and initiates the backup job based on the configuration set in the backup plan 
+10.	The successful backup job will result in a ‘recovery point’ stored in the respective vault and also is successful copied over to the US-EAST-2 region’s backup vault.
+
 ## IAM Roles
 
 AWSBackup-Custom:-
