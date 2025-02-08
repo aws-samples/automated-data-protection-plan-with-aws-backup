@@ -90,13 +90,15 @@ aws cloudformation create-stack --stack-name MasterAccountStack --template-body 
 ```
 
 4.	Deploy the Target Account CloudFormation Template:
+
 •	Deploy the 'targetAcct.yml' CloudFormation template from the 'CloudFormation_Templates' folder of the cloned repository in the AWS CloudFormation console of the target account's primary region (i.e us-east-1). 
 
 ```bash
 aws cloudformation create-stack --stack-name TargetAccountStack --template-body file://CloudFormation_Templates/targetAcct.yml
 ```
 
-•	This template creates below resources:
+This template creates below resources:
+
 o	SSM Parameter Store parameter for an AWS Backup Plan, storing the backup plan configuration as a JSON object that can be referenced by AWS Backup to perform backups. 
 o	Amazon RDS instance with the specified DB engine in a VPC.
 o	IAM role required for the master account's Lambda functions to perform AWS Backup service deployment operations on the target account.
